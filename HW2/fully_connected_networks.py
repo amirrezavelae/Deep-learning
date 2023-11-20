@@ -523,26 +523,21 @@ class FullyConnectedNet(object):
         #####################################################################
         loss = 0.0
         grads = {}
-        exp = torch.exp(scores - torch.max(scores, dim=1, keepdim=True)[0])
-        softmax = exp / torch.sum(exp, dim=1, keepdim=True)
-        loss += -torch.log(softmax[range(N), y]).sum()
-        loss /= N
+        loss, dscores = softmax_loss(scores, y)
         for i in range(1, self.num_layers + 1):
-            w = self.params['W' + str(i)]
-            loss += self.reg * torch.sum(w * w)
-        grads[self.num_layers] = h[self.num_layers -
-                                   1].t().mm(softmax - torch.eye(softmax.shape[1])[y].to(x.device))
-        grads[self.num_layers] /= N
-        grads[self.num_layers] += 2 * self.reg * \
-            self.params['W' + str(self.num_layers)]
+            loss += self.reg * torch.sum(self.params['W' + str(i)] ** 2)
         dh = {}
-        dh[self.num_layers - 1] = (softmax - torch.eye(softmax.shape[1])[y].to(x.device)).mm(
-            self.params['W' + str(self.num_layers)].t())
+        dh[self.num_layers - 1], grads['W' + str(self.num_layers)], grads['b' + str(
+            self.num_layers)] = Linear.backward(dscores, cache[self.num_layers])
+        grads['W' + str(self.num_layers)] += 2 * self.reg * \
+            self.params['W' + str(self.num_layers)]
         for i in range(self.num_layers - 1, 0, -1):
             if self.use_dropout:
-                dh[i] = Dropout.backward(dh[i + 1], cache[i + 1])
-            dh[i], dw, db = Linear_ReLU.backward(dh[i + 1], cache[i])
-            grads['W' + str(i)] = dw + 2 * self.reg * self.params['W' + str(i)]
+                dh[i] = Dropout.backward(dh[i], cache[i + 1])
+            dh[i - 1], grads['W' + str(i)], grads['b' + str(
+                i)] = Linear_ReLU.backward(dh[i], cache[i])
+            grads['W' + str(i)] += 2 * self.reg * self.params['W' + str(i)]
+
         ###########################################################
         #                   END OF YOUR CODE                      #
         ###########################################################
