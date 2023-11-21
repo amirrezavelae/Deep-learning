@@ -32,8 +32,6 @@ class Linear(object):
         N = x.shape[0]
         x = x.reshape(N, -1)
         out = x.mm(w) + b
-        # x: A tensor containing input data, of shape (N, d_1, ..., d_k)
-        x = x.reshape(N, *x.shape[1:])
         ######################################################################
         #                        END OF YOUR CODE                            #
         ######################################################################
@@ -61,10 +59,12 @@ class Linear(object):
         ##################################################
         # TODO: Implement the linear backward pass.      #
         ##################################################
+        N = x.shape[0]
+        x = x.reshape(N, -1)
         dx = dout.mm(w.t())
-        dx = dx.reshape(x.shape)
+        dx = dx.reshape(N, *x.shape[1:])
         dw = x.t().mm(dout)
-        db = dout.sum(axis=0)
+        db = dout.sum(dim=0)
         ##################################################
         #                END OF YOUR CODE                #
         ##################################################
@@ -248,11 +248,9 @@ class TwoLayerNet(object):
         # weights and biases using the keys 'W1' and 'b1' and second layer#
         # weights and biases using the keys 'W2' and 'b2'.                #
         ###################################################################
-        w1 = (torch.randn(input_dim, hidden_dim)
-              * weight_scale).to(torch.float64)
+        w1 = (torch.randn(input_dim, hidden_dim) * weight_scale).to(torch.float64)
         b1 = torch.zeros(hidden_dim).to(torch.float64)
-        w2 = (torch.randn(hidden_dim, num_classes)
-              * weight_scale).to(torch.float64)
+        w2 = (torch.randn(hidden_dim, num_classes) * weight_scale).to(torch.float64)
         b2 = torch.zeros(num_classes).to(torch.float64)
         self.params = {'W1': w1, 'b1': b1, 'W2': w2, 'b2': b2}
         ###############################################################
@@ -338,8 +336,7 @@ class TwoLayerNet(object):
         correct_class_scores_exp = scores_exp[range(N), y]
         softmax_matrix = scores_exp / scores_exp.sum(dim=1, keepdim=True)
         loss = -torch.log(correct_class_scores_exp / scores_exp.sum(dim=1)).mean() + \
-            self.reg * (torch.sum(w1 * w1) + torch.sum(w2 * w2))
-
+              self.reg * (torch.sum(w1 * w1) + torch.sum(w2 * w2))
         dscores = softmax_matrix
         dscores[range(N), y] -= 1
         dscores /= N
@@ -414,16 +411,16 @@ class FullyConnectedNet(object):
         #######################################################################
         w1 = torch.randn(input_dim, hidden_dims[0]) * weight_scale
         b1 = torch.zeros(hidden_dims[0])
-        self.params = {'W1': w1.to(torch.float64), 'b1': b1.to(torch.float64)}
+        self.params = {'W1': w1.to(dtype), 'b1': b1.to(dtype)}
         for i in range(1, self.num_layers - 1):
             w = torch.randn(hidden_dims[i - 1], hidden_dims[i]) * weight_scale
             b = torch.zeros(hidden_dims[i])
-            self.params['W' + str(i + 1)] = w.to(torch.float64)
-            self.params['b' + str(i + 1)] = b.to(torch.float64)
+            self.params['W' + str(i + 1)] = w.to(dtype)
+            self.params['b' + str(i + 1)] = b.to(dtype)
         w = torch.randn(hidden_dims[-1], num_classes) * weight_scale
         b = torch.zeros(num_classes)
-        self.params['W' + str(self.num_layers)] = w.to(torch.float64)
-        self.params['b' + str(self.num_layers)] = b.to(torch.float64)
+        self.params['b' + str(self.num_layers)] = b.to(dtype)
+        self.params['W' + str(self.num_layers)] = w.to(dtype)
         #######################################################################
         #                         END OF YOUR CODE                            #
         #######################################################################
@@ -487,16 +484,19 @@ class FullyConnectedNet(object):
         # to each dropout forward pass.                                  #
         ##################################################################
         N = X.shape[0]
-        x = X.reshape(N, -1)
+        x = X.reshape(N, -1).cpu()
         h = {}
         cache = {}
+        mask = {}
         h[0] = x
         for i in range(1, self.num_layers):
             w = self.params['W' + str(i)]
             b = self.params['b' + str(i)]
             h[i], cache[i] = Linear_ReLU.forward(h[i - 1], w, b)
             if self.use_dropout:
-                h[i], cache[i + 1] = Dropout.forward(h[i], self.dropout_param)
+                #save dropout mask and cache
+                h[i], mask[i] = Dropout.forward(h[i], self.dropout_param)
+                
         w = self.params['W' + str(self.num_layers)]
         b = self.params['b' + str(self.num_layers)]
         scores, cache[self.num_layers] = Linear.forward(
@@ -507,7 +507,7 @@ class FullyConnectedNet(object):
 
         # If test mode return early
         if mode == 'test':
-            return scores
+            return scores.to(self.device)
 
         loss, grads = 0.0, {}
         #####################################################################
@@ -533,11 +533,12 @@ class FullyConnectedNet(object):
             self.params['W' + str(self.num_layers)]
         for i in range(self.num_layers - 1, 0, -1):
             if self.use_dropout:
-                dh[i] = Dropout.backward(dh[i], cache[i + 1])
+                dh[i] = Dropout.backward(dh[i], mask[i])
+            #print([a for a in cache[i]])
+            # print(cache[i])
             dh[i - 1], grads['W' + str(i)], grads['b' + str(
                 i)] = Linear_ReLU.backward(dh[i], cache[i])
             grads['W' + str(i)] += 2 * self.reg * self.params['W' + str(i)]
-
         ###########################################################
         #                   END OF YOUR CODE                      #
         ###########################################################
@@ -571,8 +572,8 @@ def get_three_layer_network_params():
     # TODO: Change weight_scale and learning_rate so your         #
     # model achieves 100% training accuracy within 20 epochs.     #
     ###############################################################
-    weight_scale = 1e-2   # Experiment with this!
-    learning_rate = 1e-4  # Experiment with this!
+    weight_scale = 1e-10   # Experiment with this!
+    learning_rate = 1e-10  # Experiment with this!
     ################################################################
     #                             END OF YOUR CODE                 #
     ################################################################
@@ -584,7 +585,7 @@ def get_five_layer_network_params():
     # TODO: Change weight_scale and learning_rate so your          #
     # model achieves 100% training accuracy within 20 epochs.      #
     ################################################################
-    learning_rate = 2e-3  # Experiment with this!
+    learning_rate = 2e-6  # Experiment with this!
     weight_scale = 1e-5   # Experiment with this!
     ################################################################
     #                       END OF YOUR CODE                       #
@@ -777,7 +778,7 @@ class Dropout(object):
             # inverted dropout.                                          #
             # Store the dropout mask in the mask variable.               #
             ##############################################################
-            mask = (torch.rand(x.shape) < (1 - p)) / (1 - p)
+            mask = (torch.rand(x.shape, device=x.device) < (1 - p)) / (1 - p)
             out = x * mask
             ##############################################################
             #                   END OF YOUR CODE                         #
@@ -791,9 +792,7 @@ class Dropout(object):
             ##############################################################
             #                      END OF YOUR CODE                      #
             ##############################################################
-
         cache = (dropout_param, mask)
-
         return out, cache
 
     @staticmethod
